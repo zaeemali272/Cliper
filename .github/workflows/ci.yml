@@ -1,0 +1,16 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --dev
+      - run: uv run pytest -q
+      - name: import check (downloads static ffmpeg if none on PATH)
+        run: uv run python -c "import cliper.main; from cliper.config import FFMPEG, CAPTIONS_SUPPORTED; print(FFMPEG, CAPTIONS_SUPPORTED)"

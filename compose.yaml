@@ -1,0 +1,10 @@
+services:
+  cliper:
+    build: .
+    ports: ["8000:8000"]
+    volumes: ["./data:/data"]
+    environment:
+      # CLIPER_PASSWORD: change-me
+      # CLIPER_COOKIES: /data/cookies.txt   # put cookies.txt in ./data
+      CLIPER_DATA: /data
+    restart: unless-stopped

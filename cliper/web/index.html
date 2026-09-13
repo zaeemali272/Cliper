@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cliper</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">✂</span> Cliper</div>
+  <div class="tag">Most-watched moments → Shorts &amp; Reels. Free, local, no API keys.</div>
+  <nav class="tabs"><button class="tab active" data-tab="clips">Clips</button><button class="tab" data-tab="check">Copyright check</button></nav>
+</header>
+
+<main id="tab-clips">
+  <section class="card" id="input-card">
+    <form id="url-form">
+      <input id="url" type="url" required placeholder="Paste a YouTube or Twitch video / VOD URL…" autocomplete="off">
+      <button type="submit" id="analyze-btn">Analyze</button>
+    </form>
+    <p class="hint">YouTube videos use the official “Most replayed” graph. Twitch VODs and YouTube stream VODs use chat activity. Anything without either falls back to audio loudness.</p>
+  </section>
+
+  <section class="card hidden" id="progress-card">
+    <div class="prog-row"><span id="prog-msg">Working…</span><span id="prog-pct">0%</span></div>
+    <div class="bar"><div id="prog-fill"></div></div>
+    <p class="error hidden" id="prog-error"></p>
+    <ul id="prog-log" class="log"></ul>
+  </section>
+
+  <section class="hidden" id="video-section">
+    <div class="card video-card">
+      <div class="video-meta">
+        <img id="thumb" alt="">
+        <div>
+          <h2 id="title"></h2>
+          <div class="sub"><span id="uploader"></span> · <span id="duration"></span> · <span class="pill" id="source"></span> · <span class="pill" id="mode" title=""></span> · <button class="linkish" id="reanalyze">↻ re-analyze</button></div>
+        </div>
+      </div>
+      <div class="player-wrap"><div id="player"></div></div>
+      <div class="chart-wrap">
+        <canvas id="chart" height="140"></canvas>
+        <div id="chart-tip" class="tip hidden"></div>
+      </div>
+      <div class="legend"><span class="sw hot"></span> interest &nbsp; <span class="sw win"></span> planned clip &nbsp; <span class="sw peak"></span> top moment — click the graph to seek</div>
+      <div id="highlights" class="chips"></div>
+    </div>
+
+    <div class="card">
+      <h3>Generate clips</h3>
+      <div class="opts">
+        <label>Clips <input type="number" id="opt-count" min="1" max="60" value="10"></label>
+        <label>Min length (s) <input type="number" id="opt-min" min="3" max="180" value="8"></label>
+        <label>Max length (s) <input type="number" id="opt-max" min="3" max="180" value="15"></label>
+        <label>Video type
+          <select id="opt-mode">
+            <option value="">Auto</option>
+            <option value="talking">Talking / commentary</option>
+            <option value="podcast">Podcast / interview</option>
+            <option value="gameplay">Gameplay (+ facecam)</option>
+            <option value="irl">IRL / vlog / stream</option>
+            <option value="music">Music</option>
+          </select>
+        </label>
+        <label>Framing
+          <select id="opt-layout">
+            <option value="auto">Auto (face tracking / stacked)</option>
+            <option value="crop">9:16 crop, follow face</option>
+            <option value="blur">9:16 blurred background</option>
+            <option value="original">Keep original (landscape)</option>
+          </select>
+        </label>
+        <label>Captions
+          <select id="opt-captions">
+            <option value="auto">Auto (platform subs, else Whisper)</option>
+            <option value="whisper">Whisper (local)</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>Speed
+          <select id="opt-speed"><option value="">Auto</option><option value="1">1.00×</option><option value="1.05">1.05×</option><option value="1.1">1.10×</option><option value="1.15">1.15×</option></select>
+        </label>
+        <label>Source quality
+          <select id="opt-quality"><option value="">Best available (4K if offered)</option><option value="1440">Up to 1440p</option><option value="1080">Up to 1080p (faster)</option><option value="720">Up to 720p (fastest)</option></select>
+        </label>
+        <label>Pitch
+          <select id="opt-pitch"><option value="">Auto</option><option value="1">Original</option><option value="1.02">+2%</option><option value="0.98">−2%</option><option value="1.04">+4%</option></select>
+        </label>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="opt-punch" checked> Punch-in zooms</label>
+        <label title="Shows the hook line at the top for the first seconds. Off by default because the captions already show it."><input type="checkbox" id="opt-title"> Hook title card</label>
+        <label><input type="checkbox" id="opt-progress" checked> Progress bar</label>
+        <label><input type="checkbox" id="opt-grade" checked> Color grade</label>
+        <label><input type="checkbox" id="opt-mirror"> Mirror</label>
+      </div>
+      <p class="hint" id="caption-hint"></p>
+      <p class="hint">Edits are chosen per video type: face-tracked crops, stacked game + facecam, split podcasts, word-highlight captions, loudness normalised to −14 LUFS. They help retention and reduce automated matching — they don't make reposting someone else's content legal. Get permission or stay within fair use.</p>
+      <button id="generate-btn" class="primary">Generate clips</button>
+    </div>
+
+    <div class="card hidden" id="clips-card">
+      <div class="clips-head">
+        <h3>Clips <span id="clips-count"></span></h3>
+        <a id="zip-link" class="btn hidden" href="#">Download all (.zip)</a>
+      </div>
+      <p class="outpath" id="outpath"></p>
+      <div id="clips" class="grid"></div>
+    </div>
+  </section>
+
+  <section class="card" id="recent-card">
+    <h3>Recent</h3>
+    <ul id="recent" class="recent"></ul>
+  </section>
+</main>
+
+<main id="tab-check" class="hidden">
+  <section class="card">
+    <h3>Will this get flagged?</h3>
+    <p class="hint">An estimate, not a guarantee: matching systems (Content ID etc.) are proprietary. This checks the two things that drive most claims — <b>recognisable music</b> (via Shazam) and <b>how close the clip still is to its source</b> (visual hashes that survive crops/mirroring, audio correlation that survives speed/pitch changes).</p>
+  </section>
+  <section class="card" id="check-clips-card">
+    <h3>Generated clips <span class="hint" id="check-job-title"></span></h3>
+    <div id="check-clips" class="check-list"></div>
+  </section>
+  <section class="card">
+    <h3>Check any video file</h3>
+    <form id="check-form" class="opts">
+      <label>Video file <input type="file" id="chk-file" accept="video/*,audio/*" required></label>
+      <label>Source URL (optional, to compare) <input type="url" id="chk-url" placeholder="https://youtube.com/watch?v=…"></label>
+      <label>Where in the source it starts (s) <input type="number" id="chk-start" min="0" step="0.1" value="0"></label>
+      <label>Speed applied <input type="number" id="chk-speed" min="0.5" max="2" step="0.01" value="1"></label>
+    </form>
+    <button id="chk-btn" class="primary">Check</button>
+    <div id="chk-result" class="report hidden"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
