@@ -86,17 +86,28 @@ def cookie_args(force_browser: bool = False) -> list[str]:
 
 
 def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp; if YouTube refuses (bot check / 403), retry with browser cookies or client fallbacks."""
-    cmd = [*YTDLP, *cookie_args(), *args]
+    """Run yt-dlp; if it fails due to invalid cookies or bot checks, try smart fallbacks."""
+    c_args = cookie_args()
+    cmd = [*YTDLP, *c_args, *args]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0 and any(k in (r.stderr or "").lower() for k in _BLOCKED):
-        if BROWSER and not COOKIES:
+    if r.returncode != 0:
+        err_lower = (r.stderr or "").lower()
+        # 1. If cookies were passed but are invalid/rotated or causing errors, try WITHOUT cookies
+        if c_args and ("cookies are no longer valid" in err_lower or "reloaded" in err_lower or any(k in err_lower for k in _BLOCKED)):
+            log.info("Saved cookies failed or expired; retrying yt-dlp without cookies")
+            r = subprocess.run([*YTDLP, *args], capture_output=True, text=True, timeout=timeout)
+
+        # 2. If browser cookies available, try browser
+        if r.returncode != 0 and BROWSER and not c_args and any(k in (r.stderr or "").lower() for k in _BLOCKED):
             log.info("YouTube refused request; retrying with %s cookies", BROWSER)
             r = subprocess.run([*YTDLP, *cookie_args(True), *args], capture_output=True, text=True, timeout=timeout)
-        if r.returncode != 0:
-            log.info("Retrying yt-dlp with tv/web player clients fallback")
-            fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=tv,web", *cookie_args(), *args]
+
+        # 3. Try visionos/tv player client fallback
+        if r.returncode != 0 and any(k in (r.stderr or "").lower() for k in _BLOCKED):
+            log.info("Retrying yt-dlp with visionos/tv player clients fallback")
+            fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *args]
             r = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
+
     if r.returncode != 0:
         msg = (r.stderr or "").strip().splitlines()
         raise RuntimeError(msg[-1] if msg else f"yt-dlp exited {r.returncode}")
