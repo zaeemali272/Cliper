@@ -7,4 +7,5 @@ services:
       # CLIPER_PASSWORD: change-me
       # CLIPER_COOKIES: /data/cookies.txt   # put cookies.txt in ./data
       CLIPER_DATA: /data
+      XDG_CACHE_HOME: /data/cache
     restart: unless-stopped

@@ -7,6 +7,7 @@ COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY cliper ./cliper
 RUN uv sync --frozen --no-dev
 ENV CLIPER_DATA=/data
+ENV XDG_CACHE_HOME=/data/cache
 VOLUME ["/data"]
 EXPOSE 8000
 CMD ["uv", "run", "--no-sync", "cliper", "--host", "0.0.0.0", "--port", "8000", "--no-browser"]

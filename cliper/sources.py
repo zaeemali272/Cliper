@@ -113,36 +113,50 @@ def cookie_status_summary() -> str:
 
 
 def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp with user-provided cookies.txt and android_vr / tv_embedded player client fallbacks."""
+    """Run yt-dlp with user-provided cookies.txt, browser user-agent, and android_vr / tv_embedded player client fallbacks."""
     c_args = cookie_args()
     status_info = cookie_status_summary()
     log.info("yt-dlp execution starting. Cookie status: %s", status_info)
 
+    base_flags = [
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "--add-header", "Accept-Language: en-US,en;q=0.9",
+        "--add-header", "Sec-Fetch-Mode: navigate",
+    ]
+    if os.environ.get("CLIPER_PROXY"):
+        base_flags.extend(["--proxy", os.environ["CLIPER_PROXY"]])
+    elif os.environ.get("HTTP_PROXY"):
+        base_flags.extend(["--proxy", os.environ["HTTP_PROXY"]])
+
+    cache_dir = DATA_DIR / "cache"
+    if cache_dir.exists():
+        base_flags.extend(["--cache-dir", str(cache_dir)])
+
     strategies = []
     # 1. Android VR & Android Creator (Most reliable against BotGuard / cloud datacenter IP blocks)
     if c_args:
-        strategies.append(("Android VR + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
-        strategies.append(("Android Creator + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android_creator", *c_args, *args]))
-        strategies.append(("TV Embedded + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
+        strategies.append(("Android VR + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
+        strategies.append(("Android Creator + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_creator", *c_args, *args]))
+        strategies.append(("TV Embedded + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
     
-    strategies.append(("Android VR (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android_vr", *args]))
-    strategies.append(("Android Creator (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android_creator", *args]))
-    strategies.append(("TV Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
-    strategies.append(("TV/Web Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *args]))
+    strategies.append(("Android VR (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_vr", *args]))
+    strategies.append(("Android Creator (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_creator", *args]))
+    strategies.append(("TV Embedded (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
+    strategies.append(("TV/Web Embedded (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *args]))
 
     # 2. Android player client
     if c_args:
-        strategies.append(("Android Client + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android", *c_args, *args]))
-    strategies.append(("Android Client (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android", *args]))
+        strategies.append(("Android Client + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android", *c_args, *args]))
+    strategies.append(("Android Client (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android", *args]))
 
     # 3. Standard with user cookies
     if c_args:
-        strategies.append(("Standard + User Cookies", [*YTDLP, *c_args, *args]))
-        strategies.append(("VisionOS/Web + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args]))
+        strategies.append(("Standard + User Cookies", [*YTDLP, *base_flags, *c_args, *args]))
+        strategies.append(("VisionOS/Web + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args]))
     
     # 4. VisionOS / Web fallback without cookies
-    strategies.append(("VisionOS/Web (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *args]))
-    strategies.append(("Standard Default (No Cookies)", [*YTDLP, *args]))
+    strategies.append(("VisionOS/Web (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=visionos,web", *args]))
+    strategies.append(("Standard Default (No Cookies)", [*YTDLP, *base_flags, *args]))
 
     attempts = []
     for name, cmd in strategies:
