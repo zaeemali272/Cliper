@@ -86,40 +86,29 @@ def cookie_args(force_browser: bool = False) -> list[str]:
 
 
 def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp with smart fallbacks for cookies, browser cookies, and player client overrides."""
+    """Run yt-dlp with a multi-tiered fallback strategy for cookies, client extractors, and guest sessions."""
     c_args = cookie_args()
-    cmd = [*YTDLP, *c_args, *args]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0:
-        err_lower = (r.stderr or "").lower()
-        is_blocked = any(k in err_lower for k in _BLOCKED)
+    
+    strategies = []
+    if c_args:
+        strategies.append([*YTDLP, *c_args, *args])
+        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *c_args, *args])
+    
+    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *args])
+    strategies.append([*YTDLP, *args])
 
-        # 1. If explicit cookies failed/expired, retry without cookies
-        if c_args and ("cookies are no longer valid" in err_lower or "reloaded" in err_lower or is_blocked):
-            log.info("Explicit cookies failed/expired; retrying yt-dlp without cookies")
-            r = subprocess.run([*YTDLP, *args], capture_output=True, text=True, timeout=timeout)
+    if BROWSER and not c_args:
+        strategies.append([*YTDLP, *cookie_args(True), *args])
 
-        # 2. If blocked and local browser detected (Firefox/Chrome/etc.), try browser cookies
-        if r.returncode != 0 and BROWSER and is_blocked:
-            log.info("YouTube refused request; retrying with local %s browser cookies", BROWSER)
-            r = subprocess.run([*YTDLP, *cookie_args(True), *args], capture_output=True, text=True, timeout=timeout)
+    last_proc = None
+    for cmd in strategies:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if r.returncode == 0:
+            return r
+        last_proc = r
 
-        # 3. Try ios,web player client fallback (most reliable for datacenter IPs)
-        if r.returncode != 0 and is_blocked:
-            log.info("Retrying yt-dlp with ios,web player client fallback")
-            fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=ios,web", *c_args, *args]
-            r = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
-
-        # 4. Try visionos,tv player client fallback
-        if r.returncode != 0:
-            log.info("Retrying yt-dlp with visionos,tv player client fallback")
-            fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *args]
-            r = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
-
-    if r.returncode != 0:
-        msg = (r.stderr or "").strip().splitlines()
-        raise RuntimeError(msg[-1] if msg else f"yt-dlp exited {r.returncode}")
-    return r
+    msg = (last_proc.stderr or "").strip().splitlines() if last_proc else []
+    raise RuntimeError(msg[-1] if msg else "yt-dlp failed to process video")
 
 
 def fetch_info(url: str, job_dir: Path, want_subs: bool) -> dict:
