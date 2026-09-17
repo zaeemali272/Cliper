@@ -1,8 +1,21 @@
 const $ = (s) => document.querySelector(s);
+
+let currentUser = null;
+let currentQuotas = null;
+
 const api = async (path, opts = {}) => {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const errorMsg = data.detail || r.statusText;
+    if (r.status === 401 && !path.includes("/api/auth/me")) {
+      openAuthModal("login", errorMsg);
+    } else if (r.status === 429) {
+      openUpgradeModal(errorMsg);
+    }
+    throw new Error(errorMsg);
+  }
+  return data;
 };
 
 let job = null;         // current job state
@@ -16,8 +29,134 @@ const fmt = (s) => {
   return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(x).padStart(2, "0");
 };
 
+// ------------------------------------------------------------------ AUTH & SAAS FLOW
+
+async function checkAuth() {
+  try {
+    const res = await api("/api/auth/me");
+    currentUser = res.user;
+    currentQuotas = res.quotas;
+    renderUserArea();
+  } catch (err) {
+    currentUser = null;
+    currentQuotas = null;
+    renderUserArea();
+  }
+}
+
+function renderUserArea() {
+  const el = $("#user-area");
+  if (currentUser) {
+    el.innerHTML = `
+      <span class="user-badge">${currentUser.status_label}</span>
+      <span class="user-email" title="${currentUser.email}">${currentUser.email}</span>
+      <button class="linkish" style="font-size:12px;" onclick="openCookieModal()">🍪 Cookies</button>
+      ${!currentUser.is_pro ? '<button class="primary" style="padding:4px 12px;font-size:12px;" onclick="openUpgradeModal()">Upgrade</button>' : ''}
+      <button class="linkish" onclick="handleLogout()">Logout</button>
+    `;
+  } else {
+    el.innerHTML = `
+      <button class="tab" onclick="openAuthModal('login')">Log In</button>
+      <button class="primary" style="padding:6px 14px;font-size:13px;" onclick="openAuthModal('signup')">Sign Up Free</button>
+    `;
+  }
+}
+
+let activeAuthMode = "login";
+
+function openAuthModal(mode = "login", error = "") {
+  activeAuthMode = mode;
+  switchAuthTab(mode);
+  $("#auth-error").classList.toggle("hidden", !error);
+  if (error) $("#auth-error").textContent = error;
+  $("#auth-modal").classList.remove("hidden");
+}
+
+function closeAuthModal() {
+  $("#auth-modal").classList.add("hidden");
+}
+
+function switchAuthTab(mode) {
+  activeAuthMode = mode;
+  $("#tab-login-btn").classList.toggle("active", mode === "login");
+  $("#tab-signup-btn").classList.toggle("active", mode === "signup");
+  $("#auth-submit-btn").textContent = mode === "login" ? "Log In" : "Sign Up (Start Free 7-Day Trial)";
+  $("#auth-error").classList.add("hidden");
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const email = $("#auth-email").value.trim();
+  const password = $("#auth-password").value;
+  const btn = $("#auth-submit-btn");
+  
+  btn.disabled = true;
+  $("#auth-error").classList.add("hidden");
+  
+  try {
+    const endpoint = activeAuthMode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+    const res = await api(endpoint, {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+    currentUser = res.user;
+    closeAuthModal();
+    await checkAuth();
+    loadRecent();
+  } catch (err) {
+    $("#auth-error").textContent = err.message;
+    $("#auth-error").classList.remove("hidden");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function handleLogout() {
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch {}
+  currentUser = null;
+  renderUserArea();
+  $("#recent").innerHTML = "";
+  $("#video-section").classList.add("hidden");
+}
+
+function openUpgradeModal(reason = "") {
+  $("#upgrade-modal").classList.remove("hidden");
+}
+
+function closeUpgradeModal() {
+  $("#upgrade-modal").classList.add("hidden");
+}
+
+async function triggerStripeCheckout() {
+  if (!currentUser) {
+    closeUpgradeModal();
+    openAuthModal("signup", "Create a free account to upgrade.");
+    return;
+  }
+  try {
+    const res = await api("/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        success_url: window.location.origin + "/?stripe=success",
+        cancel_url: window.location.origin + "/?stripe=cancel"
+      })
+    });
+    if (res.url) {
+      window.location.href = res.url;
+    }
+  } catch (err) {
+    alert("Stripe Checkout: " + err.message);
+  }
+}
+
 // ------------------------------------------------------------------ flow
 async function analyze(url, force) {
+  if (!currentUser) {
+    openAuthModal("signup", "Please sign up or log in to analyze videos.");
+    return;
+  }
   $("#analyze-btn").disabled = true;
   $("#prog-error").classList.add("hidden");
   $("#video-section").classList.add("hidden");
@@ -27,12 +166,14 @@ async function analyze(url, force) {
     job = await api("/api/analyze", { method: "POST", body: JSON.stringify({ url, force: !!force }) });
     history.replaceState(null, "", "#" + job.id);
     poll();
+    checkAuth(); // update remaining quota count
   } catch (err) {
     showError(err.message);
   } finally {
     $("#analyze-btn").disabled = false;
   }
 }
+
 $("#reanalyze").addEventListener("click", () => job && analyze(job.url, true));
 
 $("#url-form").addEventListener("submit", async (e) => {
@@ -41,6 +182,10 @@ $("#url-form").addEventListener("submit", async (e) => {
 });
 
 $("#generate-btn").addEventListener("click", async () => {
+  if (!currentUser) {
+    openAuthModal("signup", "Please sign up or log in to generate clips.");
+    return;
+  }
   const num = (id) => ($(id).value === "" ? null : +$(id).value);
   const body = {
     count: +$("#opt-count").value, min_len: +$("#opt-min").value, max_len: +$("#opt-max").value,
@@ -54,6 +199,7 @@ $("#generate-btn").addEventListener("click", async () => {
     job = await api(`/api/jobs/${job.id}/generate`, { method: "POST", body: JSON.stringify(body) });
     $("#clips-card").classList.remove("hidden");
     poll();
+    checkAuth(); // update remaining quota count
   } catch (err) {
     alert(err.message);
     $("#generate-btn").disabled = false;
@@ -73,10 +219,65 @@ function poll() {
   tick();
 }
 
+function openCookieModal() {
+  $("#cookie-modal").classList.remove("hidden");
+  fetchCookieStatus();
+}
+
+function closeCookieModal() {
+  $("#cookie-modal").classList.add("hidden");
+}
+
+async function fetchCookieStatus() {
+  try {
+    const res = await api("/api/cookies");
+    const msg = $("#cookie-msg");
+    if (res.has_cookies) {
+      msg.textContent = "✓ Active YouTube cookies are saved on the server!";
+      msg.style.color = "var(--ok)";
+    } else {
+      msg.textContent = "No cookies saved yet.";
+      msg.style.color = "var(--muted)";
+    }
+  } catch {}
+}
+
+async function handleCookieSubmit(e) {
+  e.preventDefault();
+  const text = $("#cookie-text").value.trim();
+  if (!text) return;
+  try {
+    await api("/api/cookies", {
+      method: "POST",
+      body: JSON.stringify({ cookies: text })
+    });
+    $("#cookie-msg").textContent = "✓ YouTube cookies saved successfully!";
+    $("#cookie-msg").style.color = "var(--ok)";
+    setTimeout(closeCookieModal, 1500);
+  } catch (err) {
+    alert("Cookie save failed: " + err.message);
+  }
+}
+
+async function clearServerCookies() {
+  if (!confirm("Clear saved server cookies?")) return;
+  try {
+    await api("/api/cookies", { method: "DELETE" });
+    $("#cookie-text").value = "";
+    $("#cookie-msg").textContent = "Cookies cleared.";
+    $("#cookie-msg").style.color = "var(--muted)";
+  } catch (err) {
+    alert("Clear cookies failed: " + err.message);
+  }
+}
+
 function showError(msg) {
   $("#progress-card").classList.remove("hidden");
   $("#prog-error").textContent = msg;
   $("#prog-error").classList.remove("hidden");
+  if (msg.toLowerCase().includes("sign in to confirm") || msg.toLowerCase().includes("not a bot") || msg.toLowerCase().includes("cookies")) {
+    openCookieModal();
+  }
 }
 
 // ------------------------------------------------------------------ render
@@ -98,255 +299,260 @@ function render() {
     drawChart();
   }
   $("#generate-btn").disabled = busy;
-  if (job.clips && job.clips.length) renderClips();
-  const ck = job.id + "|" + (job.clips || []).filter((c) => c.status === "done").map((c) => c.file).join(",");
-  if (ck !== lastCheckKey) { lastCheckKey = ck; renderCheckList(); }
-}
-let lastCheckKey = "";
 
-function renderVideo() {
   $("#thumb").src = job.thumbnail || "";
   $("#title").textContent = job.title || job.url;
   $("#uploader").textContent = job.uploader || job.platform;
-  $("#duration").textContent = fmt(job.duration);
-  $("#source").textContent = { youtube_heatmap: "YouTube most-replayed", chat_density: "chat activity", audio_energy: "audio energy" }[job.signal_source] || job.signal_source;
-  $("#mode").textContent = "type: " + (job.mode || "?"); $("#mode").title = job.mode_reason || "";
-  $("#opt-mode").querySelector('option[value=""]').textContent = `Auto (detected: ${job.mode || "?"})`;
-  $("#highlights").innerHTML = (job.highlights || []).map((h, i) =>
-    `<span class="chip" data-t="${h.time}"><b>#${i + 1}</b> ${fmt(h.time)}</span>`).join("");
-  $("#highlights").querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => seek(+c.dataset.t)));
-  $("#caption-hint").textContent = job.has_captions
-    ? "YouTube auto-captions found — they'll be burned in word-by-word."
-    : job.whisper_available ? "No platform captions; Whisper (local) will transcribe each clip." :
-      "No captions for this video. Install Whisper (uv sync --extra whisper) for free local transcription, or leave captions off.";
-  mountPlayer();
-  $("#clips-card").classList.toggle("hidden", !(job.clips && job.clips.length));
+  $("#duration").textContent = fmt(job.duration || 0);
+  $("#source").textContent = job.platform || "video";
+  $("#mode").textContent = job.mode || "auto";
+  $("#mode").title = job.mode_reason || "";
+
+  renderClips();
 }
 
-function mountPlayer() {
+function renderVideo() {
   const wrap = $("#player");
   wrap.innerHTML = "";
-  if (job.platform === "youtube" && job.video_id) {
-    const f = document.createElement("iframe");
-    f.allow = "autoplay; encrypted-media; picture-in-picture";
-    f.setAttribute("width", "100%"); f.setAttribute("height", "100%");
-    f.src = `https://www.youtube.com/embed/${job.video_id}?enablejsapi=1&rel=0&origin=${location.origin}`;
-    wrap.appendChild(f);
-    let yt = null;
-    const ready = () => { yt = new YT.Player(f); };
-    if (window.YT && YT.Player) ready();
-    else { window.onYouTubeIframeAPIReady = ready; if (!$("#yt-api")) { const s = document.createElement("script"); s.id = "yt-api"; s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s); } }
-    player = { seek: (t) => { if (yt && yt.seekTo) { yt.seekTo(t, true); yt.playVideo(); } else f.src = `https://www.youtube.com/embed/${job.video_id}?enablejsapi=1&rel=0&autoplay=1&start=${Math.floor(t)}`; } };
-  } else if (job.platform === "twitch" && job.video_id) {
-    const vid = String(job.video_id).replace(/^v/, "");
-    const src = (t) => `https://player.twitch.tv/?video=v${vid}&parent=${location.hostname}&autoplay=${t != null}${t != null ? "&time=" + Math.floor(t / 3600) + "h" + Math.floor(t % 3600 / 60) + "m" + Math.floor(t % 60) + "s" : ""}`;
-    const f = document.createElement("iframe");
-    f.allow = "autoplay; fullscreen"; f.src = src(null);
-    wrap.appendChild(f);
-    player = { seek: (t) => { f.src = src(t); } };
+  if (job.video_id && job.platform === "youtube") {
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube-nocookie.com/embed/${job.video_id}?enablejsapi=1&rel=0`;
+    iframe.allow = "autoplay; encrypted-media";
+    wrap.appendChild(iframe);
+    player = {
+      seek(t) {
+        iframe.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "seekTo", args: [t, true] }), "*");
+        iframe.contentWindow?.postMessage(JSON.stringify({ event: "command", func: "playVideo", args: [] }), "*");
+      },
+    };
+  } else if (job.video_id && job.platform === "twitch") {
+    const iframe = document.createElement("iframe");
+    const parent = location.hostname || "localhost";
+    iframe.src = `https://player.twitch.tv/?video=${job.video_id}&parent=${parent}&autoplay=false`;
+    iframe.allow = "autoplay; fullscreen";
+    wrap.appendChild(iframe);
+    player = { seek(t) { iframe.contentWindow?.postMessage({ jsonrpc: "2.0", method: "seek", params: [t] }, "*"); } };
   } else {
-    wrap.innerHTML = `<div class="ph">No embedded player</div>`;
+    wrap.innerHTML = `<div class="ph">Preview player not available for this source — click clips below to watch</div>`;
     player = null;
   }
 }
 
-function seek(t) { if (player) player.seek(t); }
-
-// ------------------------------------------------------------------ chart
-const canvas = $("#chart");
 function drawChart() {
-  const sig = job.signal, n = sig.length, dur = job.duration || 1;
-  const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth, H = canvas.clientHeight;
-  canvas.width = W * dpr; canvas.height = H * dpr;
-  const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, W, H);
-  const x = (t) => (t / dur) * W;
+  const canvas = $("#chart");
+  const ctx = canvas.getContext("2d");
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * window.devicePixelRatio;
+  canvas.height = rect.height * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  const W = rect.width, H = rect.height;
 
-  // planned clip windows
-  for (const c of job.clips || []) {
-    ctx.fillStyle = c.status === "done" ? "rgba(77,209,143,.28)" : c.status === "error" ? "rgba(255,77,109,.25)" : "rgba(77,163,255,.28)";
-    ctx.fillRect(x(c.start), 0, Math.max(2, x(c.end) - x(c.start)), H);
-    ctx.fillStyle = "#cfd6e6"; ctx.font = "11px system-ui";
-    ctx.fillText("#" + c.rank, x(c.start) + 3, 12);
+  const sig = job.signal || [];
+  const wins = job.windows || [];
+  const peaks = job.peaks || [];
+  if (!sig.length) return;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // clip window overlays
+  for (const w of wins) {
+    const x1 = (w.start / job.duration) * W;
+    const x2 = (w.end / job.duration) * W;
+    ctx.fillStyle = "rgba(77,163,255,0.18)";
+    ctx.fillRect(x1, 0, x2 - x1, H);
+    ctx.strokeStyle = "rgba(77,163,255,0.6)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x1 + 0.5, 0.5, x2 - x1, H - 1);
   }
-  // signal
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#ff4d6d"); g.addColorStop(1, "rgba(255,143,77,.15)");
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.moveTo(0, H);
-  for (let i = 0; i < n; i++) {
-    const px = (i / (n - 1)) * W, py = H - Math.pow(sig[i], 0.8) * (H - 18);
-    ctx.lineTo(px, py);
+
+  // heatmap signal line / area
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let i = 0; i < sig.length; i++) {
+    const x = (i / (sig.length - 1)) * W;
+    const y = H - sig[i] * (H - 10) - 5;
+    ctx.lineTo(x, y);
   }
-  ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
-  // top moments
-  ctx.fillStyle = "#ffd84d";
-  for (const h of job.highlights || []) { ctx.beginPath(); ctx.arc(x(h.time), H - Math.pow(h.score, 0.8) * (H - 18), 3.5, 0, 7); ctx.fill(); }
-  // hover
-  if (hoverX != null) { ctx.fillStyle = "#fff8"; ctx.fillRect(hoverX, 0, 1, H); }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, "rgba(255,77,109,0.5)");
+  grad.addColorStop(1, "rgba(255,77,109,0.02)");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  for (let i = 0; i < sig.length; i++) {
+    const x = (i / (sig.length - 1)) * W;
+    const y = H - sig[i] * (H - 10) - 5;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = "#ff4d6d";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // top moment peak dots
+  for (const p of peaks) {
+    const x = (p.time / job.duration) * W;
+    const idx = Math.min(sig.length - 1, Math.floor((p.time / job.duration) * sig.length));
+    const y = H - (sig[idx] || 0) * (H - 10) - 5;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffd84d";
+    ctx.fill();
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // hover cursor
+  if (hoverX != null) {
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hoverX, 0); ctx.lineTo(hoverX, H); ctx.stroke();
+  }
 }
+
+const canvas = $("#chart");
 canvas.addEventListener("mousemove", (e) => {
-  const r = canvas.getBoundingClientRect();
-  hoverX = e.clientX - r.left;
-  const t = (hoverX / r.width) * (job.duration || 0);
+  const rect = canvas.getBoundingClientRect();
+  hoverX = e.clientX - rect.left;
+  const t = (hoverX / rect.width) * (job?.duration || 0);
   const tip = $("#chart-tip");
-  tip.style.left = hoverX + "px"; tip.textContent = fmt(t); tip.classList.remove("hidden");
+  tip.style.left = hoverX + "px";
+  tip.textContent = fmt(t);
+  tip.classList.remove("hidden");
   drawChart();
 });
-canvas.addEventListener("mouseleave", () => { hoverX = null; $("#chart-tip").classList.add("hidden"); drawChart(); });
-canvas.addEventListener("click", (e) => {
-  const r = canvas.getBoundingClientRect();
-  seek(((e.clientX - r.left) / r.width) * (job.duration || 0));
+canvas.addEventListener("mouseleave", () => {
+  hoverX = null;
+  $("#chart-tip").classList.add("hidden");
+  drawChart();
 });
-window.addEventListener("resize", () => job && job.signal && drawChart());
+canvas.addEventListener("click", (e) => {
+  if (!job || !job.duration) return;
+  const rect = canvas.getBoundingClientRect();
+  const t = ((e.clientX - rect.left) / rect.width) * job.duration;
+  player?.seek(t);
+});
 
-// ------------------------------------------------------------------ clips
-const ICON_DL = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>`;
-const ICON_C = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15 9.5a4 4 0 1 0 0 5"/></svg>`;
-const ICON_COPY = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
-const ICON_CHECK = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-
-const escapeHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function copyText(btn, text) {
-  navigator.clipboard.writeText(text).then(() => {
-    const orig = btn.innerHTML;
-    btn.innerHTML = `${ICON_CHECK} Copied!`;
-    btn.style.color = "var(--ok)";
-    setTimeout(() => {
-      btn.innerHTML = orig;
-      btn.style.color = "";
-    }, 1500);
-  });
-}
-function badgeHtml(r) {
-  const parts = [];
-  if (r.music && r.music.length) parts.push("🎵 " + r.music.map((m) => m.title).join(", "));
-  if (r.visual != null) parts.push(`visual ${Math.round(r.visual * 100)}%`);
-  if (r.audio != null) parts.push(`audio ${Math.round(r.audio * 100)}%`);
-  return `<span class="badge ${r.level}" title="${(r.reasons || []).join("\n").replace(/"/g, "&quot;")}">${r.level.toUpperCase()} risk</span> <span class="hint">${parts.join(" · ")}</span>`;
-}
 function renderClips() {
+  const clips = job.clips || [];
+  if (!clips.length) { $("#clips-card").classList.add("hidden"); return; }
   $("#clips-card").classList.remove("hidden");
-  const done = job.clips.filter((c) => c.status === "done").length;
-  $("#clips-count").textContent = `${done}/${job.clips.length}`;
-  $("#zip-link").classList.toggle("hidden", done === 0);
-  $("#zip-link").href = `/api/jobs/${job.id}/clips.zip`;
-  $("#outpath").textContent = job.output_dir ? `Saved to ${job.output_dir}` : "";
-  const landscape = job.options && job.options.layout === "original";
-  const grid = $("#clips");
-  for (const c of job.clips) {
-    let el = grid.querySelector(`[data-rank="${c.rank}"]`);
-    if (!el) {
-      el = document.createElement("div"); el.className = "clip" + (landscape ? " landscape" : ""); el.dataset.rank = c.rank;
-      grid.appendChild(el);
-    }
-    const key = c.status + "|" + (c.framing || "") + "|v5_seo";
-    if (el.dataset.status === key && el.querySelector(".seo-container")) continue;
-    el.dataset.status = key;
-    const src = `/api/jobs/${job.id}/clips/${c.file}`;
-    const media = c.status === "done"
-      ? `<video src="${src}#t=0.5" controls preload="metadata" playsinline></video>`
-      : `<div class="ph">${c.status === "error" ? "failed" : c.status === "rendering" ? '<div class="spin"></div>' : "queued"}</div>`;
-    const seo = c.seo || { title: "", description: "", tags: "", hashtags: "" };
-    const seoHtml = `<div class="seo-container">
-      <button class="seo-btn" title="SEO Metadata & Copy">${ICON_COPY} SEO</button>
-      <div class="seo-popup">
-        <div class="seo-pop-header">
-          <span>⚡ Clip SEO</span>
-          <button class="seo-copy-all">${ICON_COPY} Copy All</button>
-        </div>
-        <div class="seo-field">
-          <div class="seo-label-row">
-            <span>1. Optimized Title</span>
-            <button class="seo-item-copy" data-type="title">${ICON_COPY} Copy</button>
+  $("#clips-count").textContent = `(${clips.filter((c) => c.status === "done").length}/${clips.length})`;
+  const hasDone = clips.some((c) => c.status === "done");
+  const zip = $("#zip-link");
+  zip.classList.toggle("hidden", !hasDone);
+  zip.href = `/api/jobs/${job.id}/clips.zip`;
+
+  const container = $("#clips");
+  container.innerHTML = clips.map((c) => {
+    const isLandscape = c.layout === "original";
+    const seoBtnHtml = c.seo ? `
+      <div class="seo-container">
+        <button class="seo-btn" onclick="event.stopPropagation(); toggleSeoPopup(this)">⚡ SEO Tags</button>
+        <div class="seo-popup">
+          <div class="seo-pop-header">
+            <span>SEO Copy Pack</span>
+            <button class="seo-copy-all" onclick="copyAllSeo(this)">Copy All</button>
           </div>
-          <div class="seo-val">${escapeHtml(seo.title)}</div>
-        </div>
-        <div class="seo-field">
-          <div class="seo-label-row">
-            <span>2. High-Converting Description</span>
-            <button class="seo-item-copy" data-type="description">${ICON_COPY} Copy</button>
+          <div class="seo-field">
+            <div class="seo-label-row"><span>TITLE</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+            <div class="seo-val">${escapeHtml(c.seo.title)}</div>
           </div>
-          <div class="seo-val">${escapeHtml(seo.description)}</div>
-        </div>
-        <div class="seo-field">
-          <div class="seo-label-row">
-            <span>3. Optimized Tags (YouTube)</span>
-            <button class="seo-item-copy" data-type="tags">${ICON_COPY} Copy</button>
+          <div class="seo-field">
+            <div class="seo-label-row"><span>DESCRIPTION</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+            <div class="seo-val">${escapeHtml(c.seo.description)}</div>
           </div>
-          <div class="seo-val">${escapeHtml(seo.tags)}</div>
-        </div>
-        <div class="seo-field">
-          <div class="seo-label-row">
-            <span>4. Recommended Hashtags</span>
-            <button class="seo-item-copy" data-type="hashtags">${ICON_COPY} Copy</button>
+          <div class="seo-field">
+            <div class="seo-label-row"><span>TAGS</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+            <div class="seo-val">${escapeHtml(c.seo.hashtags ? c.seo.hashtags.join(' ') : '')}</div>
           </div>
-          <div class="seo-val">${escapeHtml(seo.hashtags)}</div>
         </div>
       </div>
+    ` : '';
+
+    let media = `<div class="ph"><div class="spin"></div> &nbsp; ${c.status}</div>`;
+    if (c.status === "done") {
+      media = `<video src="/api/jobs/${job.id}/clips/${c.file}#t=0.1" controls preload="metadata"></video>`;
+    } else if (c.status === "error") {
+      media = `<div class="ph err">${c.error || "Failed"}</div>`;
+    }
+
+    return `<div class="clip ${isLandscape ? 'landscape' : ''}">
+      ${media}
+      ${seoBtnHtml}
+      <div class="info">
+        <div class="row"><span class="rank">#${c.rank}</span> <span>${fmt(c.start)} – ${fmt(c.end)} (${Math.round(c.end - c.start)}s)</span></div>
+        ${c.hook ? `<div class="hook" title="${escapeHtml(c.hook)}">“${escapeHtml(c.hook)}”</div>` : ""}
+        ${c.status === "done" ? `<div class="actions"><a class="btn" href="/api/jobs/${job.id}/clips/${c.file}" download>Download MP4</a></div>` : ""}
+      </div>
     </div>`;
-
-    el.innerHTML = `${media}${seoHtml}<div class="info">
-      <div class="row"><span class="rank">#${c.rank}</span><span>${fmt(c.start)} – ${fmt(c.end)} · ${Math.round(c.end - c.start)}s</span></div>
-      ${c.text ? `<div class="hook" title="${(c.text || "").replace(/"/g, "&quot;")}">“${c.text}”</div>` : ""}
-      <div class="row"><span>score ${(c.score * 100).toFixed(0)}</span><span class="chip" data-t="${c.start}">▶ source</span></div>
-      ${c.status === "done" ? `<div class="actions"><a class="btn dl" href="${src}" download title="Download">${ICON_DL} MP4</a><button class="btn chk" title="Copyright check">${ICON_C} Check</button><button class="btn seo-toggle" title="Clip SEO Metadata">${ICON_COPY} SEO</button></div><div class="chkres">${c.check ? badgeHtml(c.check) : ""}</div>` : ""}
-      ${c.error ? `<div class="err">${c.error}</div>` : ""}</div>`;
-
-    el.querySelector(".chip").addEventListener("click", () => seek(c.start));
-
-    const pop = el.querySelector(".seo-popup");
-    const seoToggleBtn = el.querySelector(".seo-toggle");
-    if (seoToggleBtn && pop) {
-      seoToggleBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        pop.classList.toggle("force-show");
-      });
-    }
-
-    const copyAllBtn = el.querySelector(".seo-copy-all");
-    if (copyAllBtn) {
-      copyAllBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const fullSeo = `TITLE:\n${seo.title}\n\nDESCRIPTION:\n${seo.description}\n\nTAGS:\n${seo.tags}\n\nHASHTAGS:\n${seo.hashtags}`;
-        copyText(copyAllBtn, fullSeo);
-      });
-    }
-    el.querySelectorAll(".seo-item-copy").forEach((b) => {
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const field = b.dataset.type;
-        if (seo[field]) copyText(b, seo[field]);
-      });
-    });
-    const chk = el.querySelector(".chk");
-    if (chk) chk.addEventListener("click", async () => {
-      chk.disabled = true; chk.innerHTML = `${ICON_C} Checking…`;
-      try {
-        const r = await api(`/api/jobs/${job.id}/clips/${c.file}/check`, { method: "POST" });
-        c.check = r; el.querySelector(".chkres").innerHTML = badgeHtml(r);
-      } catch (e) { el.querySelector(".chkres").innerHTML = `<span class="err">${e.message}</span>`; }
-      chk.disabled = false; chk.innerHTML = `${ICON_C} Check`;
-    });
-  }
-  // remove stale cards from a previous generation
-  for (const el of grid.children) if (!job.clips.find((c) => String(c.rank) === el.dataset.rank)) el.remove();
+  }).join("");
 }
 
-// ------------------------------------------------------------------ recent
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+window.toggleSeoPopup = (btn) => {
+  const pop = btn.nextElementSibling;
+  const isShow = pop.classList.contains('force-show');
+  document.querySelectorAll('.seo-popup').forEach(p => p.classList.remove('force-show'));
+  if (!isShow) pop.classList.add('force-show');
+};
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.seo-container')) {
+    document.querySelectorAll('.seo-popup').forEach(p => p.classList.remove('force-show'));
+  }
+});
+
+window.copyText = (btn) => {
+  const val = btn.closest('.seo-field').querySelector('.seo-val').textContent;
+  navigator.clipboard.writeText(val);
+  const orig = btn.textContent;
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = orig, 1500);
+};
+
+window.copyAllSeo = (btn) => {
+  const pop = btn.closest('.seo-popup');
+  const vals = Array.from(pop.querySelectorAll('.seo-val')).map(v => v.textContent);
+  const text = `TITLE:\n${vals[0]}\n\nDESCRIPTION:\n${vals[1]}\n\nTAGS:\n${vals[2]}`;
+  navigator.clipboard.writeText(text);
+  const orig = btn.textContent;
+  btn.textContent = 'Copied All!';
+  setTimeout(() => btn.textContent = orig, 1500);
+};
+
 async function loadRecent() {
-  const rows = await api("/api/jobs").catch(() => []);
-  $("#recent-card").classList.toggle("hidden", rows.length === 0);
-  $("#recent").innerHTML = rows.map((r) => `<li>
-    <a href="#${r.id}" data-id="${r.id}">${r.title || r.url}</a>
-    <span class="st">${r.status}${r.clip_count ? " · " + r.clip_count + " clips" : ""}</span>
-    <button class="x" data-del="${r.id}" title="Delete">✕</button></li>`).join("");
-  $("#recent").querySelectorAll("a").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); open(a.dataset.id); }));
-  $("#recent").querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", async () => {
-    await api(`/api/jobs/${b.dataset.del}`, { method: "DELETE" }); loadRecent();
-  }));
+  if (!currentUser) {
+    $("#recent").innerHTML = '<li class="hint">Log in to view your recent jobs.</li>';
+    return;
+  }
+  try {
+    const list = await api("/api/jobs");
+    $("#recent").innerHTML = list.map((r) => `
+      <li>
+        <a href="#${r.id}" onclick="open('${r.id}')">${r.title || r.url}</a>
+        <span class="st">${r.status}</span>
+        <button class="x" onclick="delJob('${r.id}')">✕</button>
+      </li>
+    `).join("") || '<li class="hint">No recent jobs yet. Paste a URL above to start!</li>';
+  } catch (err) {
+    $("#recent").innerHTML = `<li class="error">${err.message}</li>`;
+  }
+}
+
+async function delJob(id) {
+  if (!confirm("Delete this job?")) return;
+  try {
+    await api(`/api/jobs/${id}`, { method: "DELETE" });
+    if (job?.id === id) { job = null; $("#video-section").classList.add("hidden"); }
+    loadRecent();
+  } catch (err) { alert(err.message); }
 }
 
 async function open(id) {
@@ -360,21 +566,23 @@ async function open(id) {
   } catch (err) { showError(err.message); }
 }
 
-// remember the generate settings across videos / reloads
+// remember generate settings
 const OPTS = ["opt-count", "opt-min", "opt-max", "opt-mode", "opt-layout", "opt-captions", "opt-speed", "opt-pitch",
   "opt-quality", "opt-punch", "opt-title", "opt-progress", "opt-grade", "opt-mirror"];
 try {
   const saved = JSON.parse(localStorage.getItem("cliper.opts") || "{}");
   for (const id of OPTS) { const el = document.getElementById(id); if (el && id in saved) { if (el.type === "checkbox") el.checked = saved[id]; else el.value = saved[id]; } }
 } catch {}
-for (const id of OPTS) document.getElementById(id).addEventListener("change", () => {
-  const out = {}; for (const k of OPTS) { const el = document.getElementById(k); out[k] = el.type === "checkbox" ? el.checked : el.value; }
+for (const id of OPTS) document.getElementById(id)?.addEventListener("change", () => {
+  const out = {}; for (const k of OPTS) { const el = document.getElementById(k); if (el) out[k] = el.type === "checkbox" ? el.checked : el.value; }
   try { localStorage.setItem("cliper.opts", JSON.stringify(out)); } catch {}
 });
 
-loadRecent();
-if (location.hash.length > 1) open(location.hash.slice(1));
-
+// INITIALIZE APP
+checkAuth().then(() => {
+  loadRecent();
+  if (location.hash.length > 1) open(location.hash.slice(1));
+});
 
 // ------------------------------------------------------------------ tabs
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {

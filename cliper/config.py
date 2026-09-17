@@ -30,9 +30,13 @@ YTDLP: list[str] = [sys.executable, "-m", "yt_dlp"]
 # Finished clips are copied here, one folder per video: ~/Downloads/Cliper/<title>/clip_01.mp4
 OUTPUT_DIR = Path(os.environ.get("CLIPER_OUTPUT") or Path(user_downloads_dir()) / "Cliper")
 
-# Netscape cookies.txt for yt-dlp - needed when YouTube asks a server IP to "sign in to confirm
-# you're not a bot". See the README.
-COOKIES = os.environ.get("CLIPER_COOKIES") or None
+_cookies_env = os.environ.get("CLIPER_COOKIES")
+if _cookies_env:
+    COOKIES = _cookies_env
+elif (DATA_DIR / "cookies.txt").exists():
+    COOKIES = str(DATA_DIR / "cookies.txt")
+else:
+    COOKIES = None
 
 
 def _detect_browser() -> str | None:

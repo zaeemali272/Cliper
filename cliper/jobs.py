@@ -111,9 +111,11 @@ class JobManager:
         if job:
             shutil.rmtree(job.dir, ignore_errors=True)
 
-    def list(self) -> list[dict]:
+    def list(self, allowed_ids: set[str] | None = None) -> list[dict]:
         rows = []
         for j in self.jobs.values():
+            if allowed_ids is not None and j.id not in allowed_ids:
+                continue
             d = j.public()
             rows.append({k: d.get(k) for k in ("id", "url", "title", "status", "platform", "duration",
                                                 "thumbnail", "created", "clip_count")})

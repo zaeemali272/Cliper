@@ -82,12 +82,13 @@ def cookie_args(force_browser: bool = False) -> list[str]:
 
 
 def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp; if YouTube refuses (bot check / 403), retry once with the browser's cookies."""
-    cmd = [*YTDLP, *cookie_args(), *args]
+    """Run yt-dlp; if YouTube refuses (bot check / 403), retry once with extractor-args and browser cookies."""
+    ext_args = ["--extractor-args", "youtube:player_client=ios,android,mweb,web"]
+    cmd = [*YTDLP, *ext_args, *cookie_args(), *args]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0 and BROWSER and not COOKIES and any(k in (r.stderr or "").lower() for k in _BLOCKED):
         log.info("YouTube refused the request; retrying with %s cookies", BROWSER)
-        r = subprocess.run([*YTDLP, *cookie_args(True), *args], capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run([*YTDLP, *ext_args, *cookie_args(True), *args], capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         msg = (r.stderr or "").strip().splitlines()
         raise RuntimeError(msg[-1] if msg else f"yt-dlp exited {r.returncode}")
