@@ -90,13 +90,21 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
     c_args = cookie_args()
     
     strategies = []
+    # 1. Android player client (most reliable against YouTube bot blocks on datacenter server IPs)
+    if c_args:
+        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=android", *c_args, *args])
+    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=android", *args])
+
+    # 2. Standard with cookies
     if c_args:
         strategies.append([*YTDLP, *c_args, *args])
-        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *c_args, *args])
+        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args])
     
-    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *args])
+    # 3. VisionOS fallback without cookies
+    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *args])
     strategies.append([*YTDLP, *args])
 
+    # 4. Local browser cookies fallback
     if BROWSER and not c_args:
         strategies.append([*YTDLP, *cookie_args(True), *args])
 
