@@ -104,9 +104,15 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
             log.info("YouTube refused request; retrying with local %s browser cookies", BROWSER)
             r = subprocess.run([*YTDLP, *cookie_args(True), *args], capture_output=True, text=True, timeout=timeout)
 
-        # 3. Try visionos/tv player client fallback
+        # 3. Try ios,web player client fallback (most reliable for datacenter IPs)
+        if r.returncode != 0 and is_blocked:
+            log.info("Retrying yt-dlp with ios,web player client fallback")
+            fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=ios,web", *c_args, *args]
+            r = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
+
+        # 4. Try visionos,tv player client fallback
         if r.returncode != 0:
-            log.info("Retrying yt-dlp with visionos/tv player client fallback")
+            log.info("Retrying yt-dlp with visionos,tv player client fallback")
             fallback_cmd = [*YTDLP, "--extractor-args", "youtube:player_client=visionos,tv,web", *args]
             r = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
 
