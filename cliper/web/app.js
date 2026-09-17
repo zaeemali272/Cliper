@@ -480,47 +480,62 @@ function renderClips() {
 
   const container = $("#clips");
   container.innerHTML = clips.map((c) => {
-    const isLandscape = c.layout === "original";
-    const seoBtnHtml = c.seo ? `
-      <div class="seo-container">
-        <button class="seo-btn" onclick="event.stopPropagation(); toggleSeoPopup(this)">⚡ SEO Tags</button>
-        <div class="seo-popup">
-          <div class="seo-pop-header">
-            <span>SEO Copy Pack</span>
-            <button class="seo-copy-all" onclick="copyAllSeo(this)">Copy All</button>
+    try {
+      const isLandscape = c.layout === "original";
+      let seoBtnHtml = '';
+      if (c.seo) {
+        const seoTitle = escapeHtml((c.seo && c.seo.title) || '');
+        const seoDesc = escapeHtml((c.seo && c.seo.description) || '');
+        const seoTags = escapeHtml((c.seo && Array.isArray(c.seo.hashtags)) ? c.seo.hashtags.join(' ') : (c.seo && c.seo.hashtags) || '');
+        seoBtnHtml = `
+        <div class="seo-container">
+          <button class="seo-btn" onclick="event.stopPropagation(); toggleSeoPopup(this)">⚡ SEO Tags</button>
+          <div class="seo-popup">
+            <div class="seo-pop-header">
+              <span>SEO Copy Pack</span>
+              <button class="seo-copy-all" onclick="copyAllSeo(this)">Copy All</button>
+            </div>
+            <div class="seo-field">
+              <div class="seo-label-row"><span>TITLE</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+              <div class="seo-val">${seoTitle}</div>
+            </div>
+            <div class="seo-field">
+              <div class="seo-label-row"><span>DESCRIPTION</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+              <div class="seo-val">${seoDesc}</div>
+            </div>
+            <div class="seo-field">
+              <div class="seo-label-row"><span>TAGS</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
+              <div class="seo-val">${seoTags}</div>
+            </div>
           </div>
-          <div class="seo-field">
-            <div class="seo-label-row"><span>TITLE</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
-            <div class="seo-val">${escapeHtml(c.seo.title)}</div>
-          </div>
-          <div class="seo-field">
-            <div class="seo-label-row"><span>DESCRIPTION</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
-            <div class="seo-val">${escapeHtml(c.seo.description)}</div>
-          </div>
-          <div class="seo-field">
-            <div class="seo-label-row"><span>TAGS</span><button class="seo-item-copy" onclick="copyText(this)">Copy</button></div>
-            <div class="seo-val">${escapeHtml(c.seo.hashtags ? c.seo.hashtags.join(' ') : '')}</div>
-          </div>
+        </div>`;
+      }
+
+      let media = `<div class="ph"><div class="spin"></div> &nbsp; ${escapeHtml(c.status || 'rendering')}</div>`;
+      if (c.status === "done") {
+        media = `<video src="/api/jobs/${job.id}/clips/${c.file}#t=0.1" controls preload="metadata"></video>`;
+      } else if (c.status === "error") {
+        media = `<div class="ph err">${escapeHtml(c.error || "Failed")}</div>`;
+      }
+
+      const rankStr = c.rank != null ? `#${c.rank}` : '';
+      const startStr = c.start != null ? fmt(c.start) : '0:00';
+      const endStr = c.end != null ? fmt(c.end) : '0:00';
+      const durationStr = (c.start != null && c.end != null) ? ` (${Math.round(c.end - c.start)}s)` : '';
+
+      return `<div class="clip ${isLandscape ? 'landscape' : ''}">
+        ${media}
+        ${seoBtnHtml}
+        <div class="info">
+          <div class="row"><span class="rank">${rankStr}</span> <span>${startStr} – ${endStr}${durationStr}</span></div>
+          ${c.hook ? `<div class="hook" title="${escapeHtml(c.hook)}">“${escapeHtml(c.hook)}”</div>` : ""}
+          ${c.status === "done" ? `<div class="actions"><a class="btn" href="/api/jobs/${job.id}/clips/${c.file}" download>Download MP4</a></div>` : ""}
         </div>
-      </div>
-    ` : '';
-
-    let media = `<div class="ph"><div class="spin"></div> &nbsp; ${c.status}</div>`;
-    if (c.status === "done") {
-      media = `<video src="/api/jobs/${job.id}/clips/${c.file}#t=0.1" controls preload="metadata"></video>`;
-    } else if (c.status === "error") {
-      media = `<div class="ph err">${c.error || "Failed"}</div>`;
+      </div>`;
+    } catch (err) {
+      console.error("Error rendering clip:", err, c);
+      return `<div class="clip"><div class="ph err">Error displaying clip</div></div>`;
     }
-
-    return `<div class="clip ${isLandscape ? 'landscape' : ''}">
-      ${media}
-      ${seoBtnHtml}
-      <div class="info">
-        <div class="row"><span class="rank">#${c.rank}</span> <span>${fmt(c.start)} – ${fmt(c.end)} (${Math.round(c.end - c.start)}s)</span></div>
-        ${c.hook ? `<div class="hook" title="${escapeHtml(c.hook)}">“${escapeHtml(c.hook)}”</div>` : ""}
-        ${c.status === "done" ? `<div class="actions"><a class="btn" href="/api/jobs/${job.id}/clips/${c.file}" download>Download MP4</a></div>` : ""}
-      </div>
-    </div>`;
   }).join("");
 }
 
