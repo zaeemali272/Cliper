@@ -118,46 +118,47 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
     status_info = cookie_status_summary()
     log.info("yt-dlp execution starting. Cookie status: %s", status_info)
 
-    base_flags = [
+    impersonate_flags = [
         "--impersonate", "chrome",
         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "--add-header", "Accept-Language: en-US,en;q=0.9",
         "--add-header", "Sec-Fetch-Mode: navigate",
     ]
+    plain_flags = [
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "--add-header", "Accept-Language: en-US,en;q=0.9",
+        "--add-header", "Sec-Fetch-Mode: navigate",
+    ]
     if os.environ.get("CLIPER_PROXY"):
-        base_flags.extend(["--proxy", os.environ["CLIPER_PROXY"]])
+        impersonate_flags.extend(["--proxy", os.environ["CLIPER_PROXY"]])
+        plain_flags.extend(["--proxy", os.environ["CLIPER_PROXY"]])
     elif os.environ.get("HTTP_PROXY"):
-        base_flags.extend(["--proxy", os.environ["HTTP_PROXY"]])
+        impersonate_flags.extend(["--proxy", os.environ["HTTP_PROXY"]])
+        plain_flags.extend(["--proxy", os.environ["HTTP_PROXY"]])
 
     cache_dir = DATA_DIR / "cache"
     if cache_dir.exists():
-        base_flags.extend(["--cache-dir", str(cache_dir)])
+        impersonate_flags.extend(["--cache-dir", str(cache_dir)])
+        plain_flags.extend(["--cache-dir", str(cache_dir)])
 
     strategies = []
-    # 1. Android VR & Android Creator (Most reliable against BotGuard / cloud datacenter IP blocks)
+    # Group A: Impersonate Chrome
     if c_args:
-        strategies.append(("Android VR + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
-        strategies.append(("Android Creator + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_creator", *c_args, *args]))
-        strategies.append(("TV Embedded + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
-    
-    strategies.append(("Android VR (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_vr", *args]))
-    strategies.append(("Android Creator (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android_creator", *args]))
-    strategies.append(("TV Embedded (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
-    strategies.append(("TV/Web Embedded (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *args]))
+        strategies.append(("Impersonate + Android VR + User Cookies", [*YTDLP, *impersonate_flags, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
+        strategies.append(("Impersonate + TV Embedded + User Cookies", [*YTDLP, *impersonate_flags, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
+        strategies.append(("Impersonate + Standard + User Cookies", [*YTDLP, *impersonate_flags, *c_args, *args]))
+    strategies.append(("Impersonate + Android VR (No Cookies)", [*YTDLP, *impersonate_flags, "--extractor-args", "youtube:player_client=android_vr", *args]))
+    strategies.append(("Impersonate + TV Embedded (No Cookies)", [*YTDLP, *impersonate_flags, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
+    strategies.append(("Impersonate + Standard (No Cookies)", [*YTDLP, *impersonate_flags, *args]))
 
-    # 2. Android player client
+    # Group B: Plain flags (without --impersonate)
     if c_args:
-        strategies.append(("Android Client + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android", *c_args, *args]))
-    strategies.append(("Android Client (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=android", *args]))
-
-    # 3. Standard with user cookies
-    if c_args:
-        strategies.append(("Standard + User Cookies", [*YTDLP, *base_flags, *c_args, *args]))
-        strategies.append(("VisionOS/Web + User Cookies", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args]))
-    
-    # 4. VisionOS / Web fallback without cookies
-    strategies.append(("VisionOS/Web (No Cookies)", [*YTDLP, *base_flags, "--extractor-args", "youtube:player_client=visionos,web", *args]))
-    strategies.append(("Standard Default (No Cookies)", [*YTDLP, *base_flags, *args]))
+        strategies.append(("Plain + Android VR + User Cookies", [*YTDLP, *plain_flags, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
+        strategies.append(("Plain + TV Embedded + User Cookies", [*YTDLP, *plain_flags, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
+        strategies.append(("Plain + Standard + User Cookies", [*YTDLP, *plain_flags, *c_args, *args]))
+    strategies.append(("Plain + Android VR (No Cookies)", [*YTDLP, *plain_flags, "--extractor-args", "youtube:player_client=android_vr", *args]))
+    strategies.append(("Plain + TV Embedded (No Cookies)", [*YTDLP, *plain_flags, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
+    strategies.append(("Plain + Standard Default (No Cookies)", [*YTDLP, *plain_flags, *args]))
 
     attempts = []
     for name, cmd in strategies:
@@ -187,12 +188,73 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
     raise RuntimeError(full_diagnostic)
 
 
+def fetch_info_fallback(url: str, job_dir: Path) -> dict:
+    import urllib.parse
+    import requests
+
+    vid = video_key(url)
+    if not vid:
+        raise RuntimeError("Invalid YouTube video URL")
+
+    # 1. Try Invidious public instances first
+    invidious_instances = [
+        "https://invidious.f5.si",
+        "https://inv.tux.pizza",
+        "https://invidious.nerdvpn.de",
+        "https://vid.puffyan.us"
+    ]
+    for inst in invidious_instances:
+        try:
+            r = requests.get(f"{inst}/api/v1/videos/{vid}", timeout=6)
+            if r.status_code == 200:
+                d = r.json()
+                return {
+                    "id": vid,
+                    "title": d.get("title") or "YouTube Video",
+                    "duration": int(d.get("lengthSeconds") or 0),
+                    "thumbnail": (d.get("videoThumbnails") or [{}])[0].get("url") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "uploader": d.get("author") or "YouTube",
+                    "extractor_key": "youtube",
+                    "webpage_url": f"https://www.youtube.com/watch?v={vid}",
+                    "formats": []
+                }
+        except Exception:
+            continue
+
+    # 2. Try YouTube official oEmbed API as fallback for title/thumbnail/author
+    try:
+        oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+        r = requests.get(oembed_url, timeout=6)
+        if r.status_code == 200:
+            d = r.json()
+            return {
+                "id": vid,
+                "title": d.get("title") or "YouTube Video",
+                "duration": 0,
+                "thumbnail": d.get("thumbnail_url") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                "uploader": d.get("author_name") or "YouTube",
+                "extractor_key": "youtube",
+                "webpage_url": f"https://www.youtube.com/watch?v={vid}",
+                "formats": []
+            }
+    except Exception as e:
+        log.warning("oEmbed fallback failed: %s", e)
+
+    raise RuntimeError("Could not fetch video metadata from yt-dlp or fallback APIs.")
+
 
 def fetch_info(url: str, job_dir: Path, want_subs: bool) -> dict:
-    """Run yt-dlp once: write info.json (reused later for stream URLs) and, for YouTube,
-    the auto-generated English subtitles in json3 (word-level timestamps)."""
+    """Run yt-dlp once: write info.json (reused later for stream URLs). If yt-dlp fails due to datacenter IP blocks, fallback to Invidious/oEmbed API to construct info.json so job analysis never fails."""
     base = ["--no-playlist", "--skip-download", "--no-warnings", "-q", "-o", str(job_dir / "info")]
-    run_ytdlp(base + ["--write-info-json", url])
+    try:
+        run_ytdlp(base + ["--write-info-json", url])
+    except RuntimeError as e:
+        log.warning("yt-dlp failed across all strategies: %s. Attempting Invidious/oEmbed fallback...", e)
+        info = fetch_info_fallback(url, job_dir)
+        info_path = job_dir / "info.info.json"
+        info_path.write_text(json.dumps(info))
+        return info
+
     info_path = job_dir / "info.info.json"
     with info_path.open() as f:
         info = json.load(f)
