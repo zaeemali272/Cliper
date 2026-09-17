@@ -320,4 +320,4 @@ def _safe_name(title: str, limit: int = 60) -> str:
 
 
 def _err(e: Exception) -> str:
-    return f"{type(e).__name__}: {e}"[:600]
+    return f"{type(e).__name__}: {e}"[:4000]

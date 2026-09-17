@@ -73,50 +73,88 @@ def normalize_url(url: str) -> str:
 _BLOCKED = ("sign in to confirm", "not a bot", "http error 403", "login required", "private video")
 
 
-def cookie_args(force_browser: bool = False) -> list[str]:
-    """yt-dlp cookie flags: an explicit cookies.txt always; the browser only when asked for."""
+def cookie_args() -> list[str]:
+    """yt-dlp cookie flags: explicit user-provided cookies.txt only."""
     cookie_file = os.environ.get("CLIPER_COOKIES")
     if not cookie_file and (DATA_DIR / "cookies.txt").exists():
         cookie_file = str(DATA_DIR / "cookies.txt")
     if cookie_file:
         return ["--cookies", cookie_file]
-    if force_browser and BROWSER:
-        return ["--cookies-from-browser", BROWSER]
     return []
 
 
-def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp with a multi-tiered fallback strategy for cookies, client extractors, and guest sessions."""
-    c_args = cookie_args()
+def cookie_status_summary() -> str:
+    cookie_file = os.environ.get("CLIPER_COOKIES")
+    if not cookie_file:
+        c_path = DATA_DIR / "cookies.txt"
+        if c_path.exists():
+            cookie_file = str(c_path)
+    if not cookie_file:
+        return "No cookies file found (neither CLIPER_COOKIES nor DATA_DIR/cookies.txt exists)."
+    p = Path(cookie_file)
+    if not p.exists():
+        return f"Cookie file specified at '{cookie_file}' does not exist."
+    size = p.stat().st_size
+    if size == 0:
+        return f"Cookie file at '{cookie_file}' is empty (0 bytes)."
     
+    try:
+        content = p.read_text(errors="ignore").strip()
+        has_netscape = "# Netscape" in content or "domain" in content.lower() or "\t" in content
+        first_line = content.splitlines()[0] if content else ""
+        return f"Cookie file present at '{cookie_file}' ({size} bytes, Netscape format likely: {has_netscape}, snippet: '{first_line[:40]}')."
+    except Exception as e:
+        return f"Cookie file present at '{cookie_file}' ({size} bytes, read error: {e})."
+
+
+def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
+    """Run yt-dlp with user-provided cookies.txt and android player client fallbacks, logging details for each strategy."""
+    c_args = cookie_args()
+    status_info = cookie_status_summary()
+    log.info("yt-dlp execution starting. Cookie status: %s", status_info)
+
     strategies = []
     # 1. Android player client (most reliable against YouTube bot blocks on datacenter server IPs)
     if c_args:
-        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=android", *c_args, *args])
-    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=android", *args])
+        strategies.append(("Android Client + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android", *c_args, *args]))
+    strategies.append(("Android Client (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android", *args]))
 
-    # 2. Standard with cookies
+    # 2. Standard with user cookies
     if c_args:
-        strategies.append([*YTDLP, *c_args, *args])
-        strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args])
+        strategies.append(("Standard + User Cookies", [*YTDLP, *c_args, *args]))
+        strategies.append(("VisionOS/Web + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args]))
     
-    # 3. VisionOS fallback without cookies
-    strategies.append([*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *args])
-    strategies.append([*YTDLP, *args])
+    # 3. VisionOS / Web fallback without cookies
+    strategies.append(("VisionOS/Web (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *args]))
+    strategies.append(("Standard Default (No Cookies)", [*YTDLP, *args]))
 
-    # 4. Local browser cookies fallback
-    if BROWSER and not c_args:
-        strategies.append([*YTDLP, *cookie_args(True), *args])
+    attempts = []
+    for name, cmd in strategies:
+        log.info("Trying yt-dlp strategy '%s'...", name)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            if r.returncode == 0:
+                log.info("yt-dlp strategy '%s' succeeded!", name)
+                return r
+            err_msg = (r.stderr or r.stdout or "").strip()
+            last_line = err_msg.splitlines()[-1] if err_msg else "no output"
+            log.warning("yt-dlp strategy '%s' failed (exit %d): %s", name, r.returncode, last_line)
+            attempts.append(f"[{name}] exit {r.returncode}: {last_line}")
+        except Exception as ex:
+            log.warning("yt-dlp strategy '%s' exception: %s", name, ex)
+            attempts.append(f"[{name}] exception: {ex}")
 
-    last_proc = None
-    for cmd in strategies:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if r.returncode == 0:
-            return r
-        last_proc = r
+    # Build detailed diagnostic report if all strategies fail
+    report = [
+        f"yt-dlp failed after trying {len(strategies)} strategies.",
+        f"Cookie status: {status_info}",
+        "Attempts breakdown:",
+        *attempts
+    ]
+    full_diagnostic = "\n".join(report)
+    log.error("yt-dlp failure report:\n%s", full_diagnostic)
+    raise RuntimeError(full_diagnostic)
 
-    msg = (last_proc.stderr or "").strip().splitlines() if last_proc else []
-    raise RuntimeError(msg[-1] if msg else "yt-dlp failed to process video")
 
 
 def fetch_info(url: str, job_dir: Path, want_subs: bool) -> dict:

@@ -135,7 +135,10 @@ class CookieIn(BaseModel):
 @app.get("/api/cookies")
 def get_cookie_status():
     cookie_file = DATA_DIR / "cookies.txt"
-    return {"has_cookies": cookie_file.is_file() and cookie_file.stat().st_size > 0}
+    return {
+        "has_cookies": cookie_file.is_file() and cookie_file.stat().st_size > 0,
+        "summary": sources.cookie_status_summary()
+    }
 
 
 @app.post("/api/cookies")
@@ -145,7 +148,7 @@ def save_cookies(body: CookieIn, current_user: Dict[str, Any] = Depends(auth.get
         raise HTTPException(400, "Cookie text cannot be empty")
     cookie_file = DATA_DIR / "cookies.txt"
     cookie_file.write_text(text)
-    return {"ok": True}
+    return {"ok": True, "summary": sources.cookie_status_summary()}
 
 
 @app.delete("/api/cookies")
@@ -154,6 +157,25 @@ def clear_cookies(current_user: Dict[str, Any] = Depends(auth.get_current_user))
     if cookie_file.exists():
         cookie_file.unlink()
     return {"ok": True}
+
+
+@app.get("/api/logs")
+def get_recent_logs(current_user: Dict[str, Any] = Depends(auth.get_current_user)):
+    user_jobs = set(db.get_user_job_ids(current_user["id"]))
+    logs = []
+    for jid in user_jobs:
+        job = manager.get(jid)
+        if job:
+            d = job.public()
+            if d.get("log") or d.get("error"):
+                logs.append({
+                    "job_id": jid,
+                    "title": d.get("title") or d.get("url"),
+                    "status": d.get("status"),
+                    "error": d.get("error"),
+                    "log": d.get("log", [])
+                })
+    return {"cookie_status": sources.cookie_status_summary(), "jobs": logs}
 
 
 # ---------------------------------------------------------------- JOB ENDPOINTS
