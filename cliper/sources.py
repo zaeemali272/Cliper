@@ -74,8 +74,11 @@ _BLOCKED = ("sign in to confirm", "not a bot", "http error 403", "login required
 
 def cookie_args(force_browser: bool = False) -> list[str]:
     """yt-dlp cookie flags: an explicit cookies.txt always; the browser only when asked for."""
-    if COOKIES:
-        return ["--cookies", COOKIES]
+    cookie_file = os.environ.get("CLIPER_COOKIES")
+    if not cookie_file and (DATA_DIR / "cookies.txt").exists():
+        cookie_file = str(DATA_DIR / "cookies.txt")
+    if cookie_file:
+        return ["--cookies", cookie_file]
     if force_browser and BROWSER:
         return ["--cookies-from-browser", BROWSER]
     return []
