@@ -119,6 +119,7 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
     log.info("yt-dlp execution starting. Cookie status: %s", status_info)
 
     base_flags = [
+        "--impersonate", "chrome",
         "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "--add-header", "Accept-Language: en-US,en;q=0.9",
         "--add-header", "Sec-Fetch-Mode: navigate",
