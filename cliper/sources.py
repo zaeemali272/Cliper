@@ -114,17 +114,24 @@ def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProces
     log.info("yt-dlp execution starting. Cookie status: %s", status_info)
 
     strategies = []
-    # 1. Android player client (most reliable against YouTube bot blocks on datacenter server IPs)
+    # 1. TV Embedded / Web Embedded (Bypasses BotGuard / datacenter IP blocks completely on cloud server IPs)
+    if c_args:
+        strategies.append(("TV Embedded + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
+        strategies.append(("TV/Web Embedded + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *c_args, *args]))
+    strategies.append(("TV Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
+    strategies.append(("TV/Web Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *args]))
+
+    # 2. Android player client
     if c_args:
         strategies.append(("Android Client + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android", *c_args, *args]))
     strategies.append(("Android Client (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android", *args]))
 
-    # 2. Standard with user cookies
+    # 3. Standard with user cookies
     if c_args:
         strategies.append(("Standard + User Cookies", [*YTDLP, *c_args, *args]))
         strategies.append(("VisionOS/Web + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *c_args, *args]))
     
-    # 3. VisionOS / Web fallback without cookies
+    # 4. VisionOS / Web fallback without cookies
     strategies.append(("VisionOS/Web (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=visionos,web", *args]))
     strategies.append(("Standard Default (No Cookies)", [*YTDLP, *args]))
 
