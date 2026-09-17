@@ -19,7 +19,7 @@ from typing import Callable
 
 import numpy as np
 
-from .config import BROWSER, COOKIES, FFMPEG, MAX_HEIGHT, YTDLP
+from .config import BROWSER, COOKIES, DATA_DIR, FFMPEG, MAX_HEIGHT, YTDLP
 
 log = logging.getLogger("cliper.sources")
 
