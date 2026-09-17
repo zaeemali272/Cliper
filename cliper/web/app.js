@@ -47,12 +47,31 @@ async function checkAuth() {
 function renderUserArea() {
   const el = $("#user-area");
   if (currentUser) {
+    const initial = (currentUser.email || "U").charAt(0).toUpperCase();
     el.innerHTML = `
-      <span class="user-badge">${currentUser.status_label}</span>
-      <span class="user-email" title="${currentUser.email}">${currentUser.email}</span>
-      <button class="linkish" style="font-size:12px;" onclick="openCookieModal()">🍪 Cookies</button>
-      ${!currentUser.is_pro ? '<button class="primary" style="padding:4px 12px;font-size:12px;" onclick="openUpgradeModal()">Upgrade</button>' : ''}
-      <button class="linkish" onclick="handleLogout()">Logout</button>
+      <div class="user-menu-wrapper">
+        <button class="avatar-btn" onclick="toggleUserDropdown(event)" title="${escapeHtml(currentUser.email)}">
+          <div class="avatar-circle">${initial}</div>
+        </button>
+        <div id="user-dropdown" class="user-dropdown hidden">
+          <div class="user-dropdown-header">
+            <div class="user-email-text">${escapeHtml(currentUser.email)}</div>
+            <div class="user-status-pill">${escapeHtml(currentUser.status_label)}</div>
+          </div>
+          <div class="user-dropdown-divider"></div>
+          <button class="user-dropdown-item" onclick="openCookieModal()">
+            <span>🍪 YouTube Cookies</span>
+          </button>
+          ${!currentUser.is_pro ? `
+          <button class="user-dropdown-item" onclick="openUpgradeModal()">
+            <span>⚡ Upgrade to Pro</span>
+          </button>` : ''}
+          <div class="user-dropdown-divider"></div>
+          <button class="user-dropdown-item danger" onclick="handleLogout()">
+            <span>🚪 Logout</span>
+          </button>
+        </div>
+      </div>
     `;
   } else {
     el.innerHTML = `
@@ -61,6 +80,19 @@ function renderUserArea() {
     `;
   }
 }
+
+window.toggleUserDropdown = (e) => {
+  e.stopPropagation();
+  const dropdown = $("#user-dropdown");
+  if (dropdown) dropdown.classList.toggle("hidden");
+};
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".user-menu-wrapper")) {
+    const dropdown = $("#user-dropdown");
+    if (dropdown) dropdown.classList.add("hidden");
+  }
+});
 
 let activeAuthMode = "login";
 
@@ -547,7 +579,6 @@ async function loadRecent() {
 }
 
 async function delJob(id) {
-  if (!confirm("Delete this job?")) return;
   try {
     await api(`/api/jobs/${id}`, { method: "DELETE" });
     if (job?.id === id) { job = null; $("#video-section").classList.add("hidden"); }
