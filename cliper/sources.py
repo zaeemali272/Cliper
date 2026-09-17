@@ -101,23 +101,32 @@ def cookie_status_summary() -> str:
     try:
         content = p.read_text(errors="ignore").strip()
         has_netscape = "# Netscape" in content or "domain" in content.lower() or "\t" in content
+        auth_tokens = [k for k in ("LOGIN_INFO", "SAPISID", "APISID", "SSID", "__Secure-3PAPISID", "__Secure-1PAPISID", "SID") if k in content]
         first_line = content.splitlines()[0] if content else ""
-        return f"Cookie file present at '{cookie_file}' ({size} bytes, Netscape format likely: {has_netscape}, snippet: '{first_line[:40]}')."
+        if not auth_tokens:
+            return (f"Cookie file present at '{cookie_file}' ({size} bytes, Netscape: {has_netscape}). "
+                    f"⚠️ WARNING: This cookie file appears LOGGED-OUT / ANONYMOUS (missing LOGIN_INFO or SAPISID). "
+                    f"Please log into YouTube in your browser BEFORE exporting cookies.txt so it contains account credentials!")
+        return f"Cookie file present at '{cookie_file}' ({size} bytes, Netscape: {has_netscape}, Logged-In Account Tokens: {', '.join(auth_tokens)})."
     except Exception as e:
         return f"Cookie file present at '{cookie_file}' ({size} bytes, read error: {e})."
 
 
 def run_ytdlp(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
-    """Run yt-dlp with user-provided cookies.txt and android player client fallbacks, logging details for each strategy."""
+    """Run yt-dlp with user-provided cookies.txt and android_vr / tv_embedded player client fallbacks."""
     c_args = cookie_args()
     status_info = cookie_status_summary()
     log.info("yt-dlp execution starting. Cookie status: %s", status_info)
 
     strategies = []
-    # 1. TV Embedded / Web Embedded (Bypasses BotGuard / datacenter IP blocks completely on cloud server IPs)
+    # 1. Android VR & Android Creator (Most reliable against BotGuard / cloud datacenter IP blocks)
     if c_args:
+        strategies.append(("Android VR + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android_vr", *c_args, *args]))
+        strategies.append(("Android Creator + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=android_creator", *c_args, *args]))
         strategies.append(("TV Embedded + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *c_args, *args]))
-        strategies.append(("TV/Web Embedded + User Cookies", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *c_args, *args]))
+    
+    strategies.append(("Android VR (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android_vr", *args]))
+    strategies.append(("Android Creator (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=android_creator", *args]))
     strategies.append(("TV Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded", *args]))
     strategies.append(("TV/Web Embedded (No Cookies)", [*YTDLP, "--extractor-args", "youtube:player_client=tv_embedded,web_embedded,android", *args]))
 
