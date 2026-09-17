@@ -204,6 +204,22 @@ window.addEventListener("resize", () => job && job.signal && drawChart());
 // ------------------------------------------------------------------ clips
 const ICON_DL = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>`;
 const ICON_C = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15 9.5a4 4 0 1 0 0 5"/></svg>`;
+const ICON_COPY = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+const ICON_CHECK = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+const escapeHtml = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function copyText(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = `${ICON_CHECK} Copied!`;
+    btn.style.color = "var(--ok)";
+    setTimeout(() => {
+      btn.innerHTML = orig;
+      btn.style.color = "";
+    }, 1500);
+  });
+}
 function badgeHtml(r) {
   const parts = [];
   if (r.music && r.music.length) parts.push("🎵 " + r.music.map((m) => m.title).join(", "));
@@ -226,20 +242,85 @@ function renderClips() {
       el = document.createElement("div"); el.className = "clip" + (landscape ? " landscape" : ""); el.dataset.rank = c.rank;
       grid.appendChild(el);
     }
-    const key = c.status + "|" + (c.framing || "");
-    if (el.dataset.status === key) continue;
+    const key = c.status + "|" + (c.framing || "") + "|v5_seo";
+    if (el.dataset.status === key && el.querySelector(".seo-container")) continue;
     el.dataset.status = key;
     const src = `/api/jobs/${job.id}/clips/${c.file}`;
     const media = c.status === "done"
       ? `<video src="${src}#t=0.5" controls preload="metadata" playsinline></video>`
       : `<div class="ph">${c.status === "error" ? "failed" : c.status === "rendering" ? '<div class="spin"></div>' : "queued"}</div>`;
-    el.innerHTML = `${media}<div class="info">
+    const seo = c.seo || { title: "", description: "", tags: "", hashtags: "" };
+    const seoHtml = `<div class="seo-container">
+      <button class="seo-btn" title="SEO Metadata & Copy">${ICON_COPY} SEO</button>
+      <div class="seo-popup">
+        <div class="seo-pop-header">
+          <span>⚡ Clip SEO</span>
+          <button class="seo-copy-all">${ICON_COPY} Copy All</button>
+        </div>
+        <div class="seo-field">
+          <div class="seo-label-row">
+            <span>1. Optimized Title</span>
+            <button class="seo-item-copy" data-type="title">${ICON_COPY} Copy</button>
+          </div>
+          <div class="seo-val">${escapeHtml(seo.title)}</div>
+        </div>
+        <div class="seo-field">
+          <div class="seo-label-row">
+            <span>2. High-Converting Description</span>
+            <button class="seo-item-copy" data-type="description">${ICON_COPY} Copy</button>
+          </div>
+          <div class="seo-val">${escapeHtml(seo.description)}</div>
+        </div>
+        <div class="seo-field">
+          <div class="seo-label-row">
+            <span>3. Optimized Tags (YouTube)</span>
+            <button class="seo-item-copy" data-type="tags">${ICON_COPY} Copy</button>
+          </div>
+          <div class="seo-val">${escapeHtml(seo.tags)}</div>
+        </div>
+        <div class="seo-field">
+          <div class="seo-label-row">
+            <span>4. Recommended Hashtags</span>
+            <button class="seo-item-copy" data-type="hashtags">${ICON_COPY} Copy</button>
+          </div>
+          <div class="seo-val">${escapeHtml(seo.hashtags)}</div>
+        </div>
+      </div>
+    </div>`;
+
+    el.innerHTML = `${media}${seoHtml}<div class="info">
       <div class="row"><span class="rank">#${c.rank}</span><span>${fmt(c.start)} – ${fmt(c.end)} · ${Math.round(c.end - c.start)}s</span></div>
       ${c.text ? `<div class="hook" title="${(c.text || "").replace(/"/g, "&quot;")}">“${c.text}”</div>` : ""}
       <div class="row"><span>score ${(c.score * 100).toFixed(0)}</span><span class="chip" data-t="${c.start}">▶ source</span></div>
-      ${c.status === "done" ? `<div class="actions"><a class="btn dl" href="${src}" download title="Download">${ICON_DL} MP4</a><button class="btn chk" title="Copyright check">${ICON_C} Check</button></div><div class="chkres">${c.check ? badgeHtml(c.check) : ""}</div>` : ""}
+      ${c.status === "done" ? `<div class="actions"><a class="btn dl" href="${src}" download title="Download">${ICON_DL} MP4</a><button class="btn chk" title="Copyright check">${ICON_C} Check</button><button class="btn seo-toggle" title="Clip SEO Metadata">${ICON_COPY} SEO</button></div><div class="chkres">${c.check ? badgeHtml(c.check) : ""}</div>` : ""}
       ${c.error ? `<div class="err">${c.error}</div>` : ""}</div>`;
+
     el.querySelector(".chip").addEventListener("click", () => seek(c.start));
+
+    const pop = el.querySelector(".seo-popup");
+    const seoToggleBtn = el.querySelector(".seo-toggle");
+    if (seoToggleBtn && pop) {
+      seoToggleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pop.classList.toggle("force-show");
+      });
+    }
+
+    const copyAllBtn = el.querySelector(".seo-copy-all");
+    if (copyAllBtn) {
+      copyAllBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const fullSeo = `TITLE:\n${seo.title}\n\nDESCRIPTION:\n${seo.description}\n\nTAGS:\n${seo.tags}\n\nHASHTAGS:\n${seo.hashtags}`;
+        copyText(copyAllBtn, fullSeo);
+      });
+    }
+    el.querySelectorAll(".seo-item-copy").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const field = b.dataset.type;
+        if (seo[field]) copyText(b, seo[field]);
+      });
+    });
     const chk = el.querySelector(".chk");
     if (chk) chk.addEventListener("click", async () => {
       chk.disabled = true; chk.innerHTML = `${ICON_C} Checking…`;

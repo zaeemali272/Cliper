@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import analysis, captions, clipper, framing, modes, sources
+from . import analysis, captions, clipper, framing, modes, seo, sources
 from .config import CAPTIONS_SUPPORTED, JOB_WORKERS, JOBS_DIR, MAX_HEIGHT, OUTPUT_DIR, RENDER_WORKERS
 
 log = logging.getLogger("cliper.jobs")
@@ -49,7 +49,26 @@ class Job:
 
     def public(self) -> dict:
         with self.lock:
-            return dict(self.data)
+            data = dict(self.data)
+            clips = data.get("clips")
+            if clips:
+                info = {}
+                info_path = self.dir / "info.info.json"
+                if info_path.exists():
+                    try:
+                        info = json.loads(info_path.read_text())
+                    except Exception:
+                        pass
+                if not info:
+                    info = {"title": data.get("title"), "uploader": data.get("uploader")}
+                updated_clips = []
+                for c in clips:
+                    if "seo" not in c:
+                        c = dict(c)
+                        c["seo"] = seo.generate_clip_seo(c, info)
+                    updated_clips.append(c)
+                data["clips"] = updated_clips
+            return data
 
 
 class JobManager:
@@ -200,7 +219,7 @@ class JobManager:
             job.update(message="Choosing clips from transcript" if words else "Choosing clips")
             plan = analysis.pick_clips_transcript(sig, words, count, min_len, max_len) if words \
                 else [{**c, "text": "", "hook": "", "phrases": []} for c in analysis.pick_clips(sig, count, min_len, max_len)]
-            clips = [{**c, "status": "queued", "file": f"clip_{c['rank']:02d}.mp4", "framing": None} for c in plan]
+            clips = [{**c, "status": "queued", "file": f"clip_{c['rank']:02d}.mp4", "framing": None, "seo": seo.generate_clip_seo(c, info)} for c in plan]
             export_dir = OUTPUT_DIR / _safe_name(info.get("title") or job.id)
             export_dir.mkdir(parents=True, exist_ok=True)
             for old in export_dir.glob("clip_*.mp4"):

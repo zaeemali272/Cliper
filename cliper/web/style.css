@@ -47,10 +47,11 @@ button:disabled { opacity: .5; cursor: wait; }
 #generate-btn { margin-top: 14px; }
 .clips-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
-.clip { background: #0f1115; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
-.clip video { width: 100%; aspect-ratio: 9/16; background: #000; object-fit: contain; }
+.clip { position: relative; background: #0f1115; border: 1px solid var(--line); border-radius: 12px; overflow: visible; display: flex; flex-direction: column; z-index: 1; }
+.clip:hover { z-index: 40; }
+.clip video { width: 100%; aspect-ratio: 9/16; background: #000; object-fit: contain; border-radius: 11px 11px 0 0; }
 .clip.landscape video { aspect-ratio: 16/9; }
-.clip .ph { aspect-ratio: 9/16; display: grid; place-items: center; color: var(--muted); font-size: 13px; background: #000; }
+.clip .ph { aspect-ratio: 9/16; display: grid; place-items: center; color: var(--muted); font-size: 13px; background: #000; border-radius: 11px 11px 0 0; }
 .clip.landscape .ph { aspect-ratio: 16/9; }
 .clip .info { padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
 .clip .row { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
@@ -88,3 +89,120 @@ button:disabled { opacity: .5; cursor: wait; }
 .linkish { background: none; color: var(--muted); padding: 0; font-size: 12px; font-weight: 500; text-decoration: underline; }
 .linkish:hover { color: var(--text); }
 .outpath { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+/* SEO Container & Popover */
+.seo-container { position: absolute; top: 8px; right: 8px; z-index: 99; }
+.seo-btn {
+  background: rgba(15, 17, 21, 0.85);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transition: all 0.2s ease;
+}
+.seo-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.seo-popup {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 290px;
+  max-height: 380px;
+  overflow-y: auto;
+  background: rgba(23, 26, 33, 0.97);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+  z-index: 100;
+}
+.seo-container:hover .seo-popup,
+.seo-popup:hover,
+.seo-popup.force-show {
+  display: block !important;
+}
+.seo-pop-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.seo-copy-all {
+  background: var(--line);
+  color: var(--text);
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.seo-copy-all:hover {
+  background: var(--ok);
+  color: #000;
+}
+.seo-field {
+  margin-bottom: 10px;
+}
+.seo-field:last-child {
+  margin-bottom: 0;
+}
+.seo-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.seo-item-copy {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 2px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+}
+.seo-item-copy:hover {
+  color: var(--accent);
+  background: rgba(255, 77, 109, 0.1);
+}
+.seo-val {
+  background: #0f1115;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  max-height: 65px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
